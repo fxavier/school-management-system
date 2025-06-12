@@ -1,0 +1,324 @@
+/**
+ * Prisma Schema for School Management System
+ * 
+ * This schema defines the database structure following DDD principles:
+ * - Each aggregate root has its own table
+ * - Value objects are embedded as JSON or separate fields
+ * - Multi-tenancy is enforced through tenantId field
+ * - Optimistic locking through version field
+ * - Comprehensive audit trail with timestamps and user tracking
+ * 
+ * Design Principles:
+ * - Denormalized for read performance where appropriate
+ * - Indexes on frequently queried fields
+ * - Proper foreign key constraints
+ * - Support for soft deletes where needed
+ */
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+/**
+ * Student table - Aggregate Root for Student Management
+ * 
+ * Stores all student-related information including personal details,
+ * contact information, guardians, and academic status.
+ */
+model Student {
+  // Primary identifiers
+  id            String   @id @default(cuid())
+  studentNumber String   @unique
+  tenantId      String
+  
+  // Personal information
+  firstName    String
+  lastName     String
+  dateOfBirth  DateTime
+  gender       Gender
+  email        String?   @unique
+  phoneNumber  String?
+  nationalId   String?
+  
+  // Address information (embedded value object)
+  addressStreet   String
+  addressCity     String
+  addressState    String
+  addressZipCode  String
+  addressCountry  String  @default("US")
+  
+  // Medical information
+  bloodType          String?
+  allergies          String[] // Array of allergy descriptions
+  medicalConditions  String[] // Array of medical condition descriptions
+  
+  // Academic information
+  status         StudentStatus @default(ACTIVE)
+  enrollmentDate DateTime      @default(now())
+  graduationDate DateTime?
+  notes          String?
+  
+  // Guardian information (JSON to store complex guardian data)
+  guardians      Json // Array of GuardianInfo objects
+  
+  // Audit and versioning
+  version   Int      @default(1)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  createdBy String?
+  updatedBy String?
+  
+  // Soft delete support
+  deletedAt DateTime?
+  deletedBy String?
+  
+  // Indexes for performance
+  @@index([tenantId])
+  @@index([studentNumber])
+  @@index([email])
+  @@index([status])
+  @@index([enrollmentDate])
+  @@index([graduationDate])
+  @@index([lastName, firstName])
+  @@index([tenantId, status])
+  @@index([tenantId, enrollmentDate])
+  
+  // Multi-tenancy constraint
+  @@unique([studentNumber, tenantId])
+  @@map("students")
+}
+
+/**
+ * Domain Events table for Event Sourcing/CQRS
+ * 
+ * Stores all domain events for audit trail, integration,
+ * and potential event replay scenarios.
+ */
+model DomainEvent {
+  // Event identification
+  id            String   @id @default(cuid())
+  eventId       String   @unique
+  eventType     String
+  
+  // Aggregate information
+  aggregateId   String
+  aggregateType String
+  version       Int
+  
+  // Tenant and timing
+  tenantId     String
+  occurredOn   DateTime @default(now())
+  
+  // Event payload
+  eventData    Json
+  
+  // Processing status
+  processed    Boolean  @default(false)
+  processedAt  DateTime?
+  
+  // Audit information
+  createdAt    DateTime @default(now())
+  
+  // Indexes for event processing and queries
+  @@index([aggregateId, aggregateType])
+  @@index([eventType])
+  @@index([tenantId])
+  @@index([occurredOn])
+  @@index([processed])
+  @@index([tenantId, eventType])
+  @@index([aggregateId, version])
+  
+  @@map("domain_events")
+}
+
+/**
+ * Tenant table for multi-tenancy support
+ * 
+ * Stores information about each school/organization
+ * using the system.
+ */
+model Tenant {
+  id          String   @id @default(cuid())
+  name        String
+  slug        String   @unique
+  
+  // Contact information
+  email       String
+  phoneNumber String?
+  website     String?
+  
+  // Address information
+  addressStreet   String
+  addressCity     String
+  addressState    String
+  addressZipCode  String
+  addressCountry  String @default("US")
+  
+  // Configuration
+  settings    Json     @default("{}")
+  
+  // Status and lifecycle
+  status      TenantStatus @default(ACTIVE)
+  
+  // Audit information
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  createdBy   String?
+  updatedBy   String?
+  
+  // Soft delete support
+  deletedAt   DateTime?
+  deletedBy   String?
+  
+  @@index([slug])
+  @@index([status])
+  @@map("tenants")
+}
+
+/**
+ * User table for authentication and authorization
+ * 
+ * Stores user accounts with their roles and permissions
+ * within specific tenants.
+ */
+model User {
+  id          String   @id @default(cuid())
+  email       String   @unique
+  firstName   String
+  lastName    String
+  
+  // Authentication
+  passwordHash String?
+  
+  // Profile information
+  phoneNumber  String?
+  avatarUrl    String?
+  
+  // Multi-tenancy and permissions
+  tenantId     String
+  roles        String[] // Array of role names
+  permissions  String[] // Array of permission names
+  
+  // Account status
+  status       UserStatus @default(ACTIVE)
+  emailVerified Boolean   @default(false)
+  
+  // Authentication metadata
+  lastLoginAt     DateTime?
+  passwordResetAt DateTime?
+  
+  // Audit information
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  createdBy    String?
+  updatedBy    String?
+  
+  // Soft delete support
+  deletedAt    DateTime?
+  deletedBy    String?
+  
+  // Indexes
+  @@index([email])
+  @@index([tenantId])
+  @@index([status])
+  @@index([tenantId, status])
+  
+  @@map("users")
+}
+
+/**
+ * Outbox pattern table for reliable event publishing
+ * 
+ * Ensures domain events are reliably published to external systems
+ * even in case of failures or network issues.
+ */
+model OutboxEvent {
+  id          String   @id @default(cuid())
+  
+  // Event information
+  eventId     String   @unique
+  eventType   String
+  aggregateId String
+  tenantId    String
+  
+  // Event payload
+  eventData   Json
+  
+  // Publishing status
+  published   Boolean  @default(false)
+  publishedAt DateTime?
+  
+  // Error handling
+  retryCount  Int      @default(0)
+  maxRetries  Int      @default(3)
+  lastError   String?
+  
+  // Scheduling
+  scheduledFor DateTime @default(now())
+  
+  // Audit
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  // Indexes for outbox processing
+  @@index([published])
+  @@index([scheduledFor])
+  @@index([tenantId])
+  @@index([eventType])
+  @@index([published, scheduledFor])
+  
+  @@map("outbox_events")
+}
+
+// ============================================================================
+// Enums
+// ============================================================================
+
+/**
+ * Gender enumeration
+ */
+enum Gender {
+  MALE
+  FEMALE
+  OTHER
+}
+
+/**
+ * Student status enumeration
+ * Represents the current state of a student in the system
+ */
+enum StudentStatus {
+  ACTIVE      // Currently enrolled and attending
+  INACTIVE    // Temporarily not attending
+  SUSPENDED   // Suspended for disciplinary reasons
+  TRANSFERRED // Transferred to another school
+  GRADUATED   // Successfully completed studies
+  EXPELLED    // Permanently removed from school
+}
+
+/**
+ * Tenant status enumeration
+ */
+enum TenantStatus {
+  ACTIVE      // Fully operational
+  INACTIVE    // Temporarily disabled
+  SUSPENDED   // Suspended for violations
+  TRIAL       // Trial period
+  EXPIRED     // Subscription expired
+}
+
+/**
+ * User status enumeration
+ */
+enum UserStatus {
+  ACTIVE      // Active user account
+  INACTIVE    // Temporarily disabled
+  SUSPENDED   // Suspended account
+  PENDING     // Awaiting activation
+  LOCKED      // Locked due to security
+}
