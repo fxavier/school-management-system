@@ -11,36 +11,86 @@ import {
 import { StudentNumber } from '../value-objects/student-number';
 import { GuardianInfo } from '../value-objects/guardian-info';
 
+/**
+ * Properties interface for creating a Student entity
+ * Contains all the required and optional data needed to construct a Student
+ * Used in factory methods and for type safety when creating students
+ */
 export interface StudentProps {
+  /** Unique student identifier in the format STU123456 */
   studentNumber: StudentNumber;
+  /** Student's first name */
   firstName: string;
+  /** Student's last name */
   lastName: string;
+  /** Student's date of birth */
   dateOfBirth: Date;
+  /** Student's gender identity */
   gender: 'male' | 'female' | 'other';
+  /** Student's email address (optional) */
   email?: Email;
+  /** Student's phone number (optional) */
   phoneNumber?: PhoneNumber;
+  /** Student's home address */
   address: Address;
+  /** List of guardians/parents responsible for the student */
   guardians: GuardianInfo[];
+  /** Current enrollment status */
   status: StudentStatus;
+  /** Date when the student was enrolled */
   enrollmentDate: Date;
+  /** Date when the student graduated (optional) */
   graduationDate?: Date;
+  /** Government-issued national ID number (optional) */
   nationalId?: string;
+  /** Blood type for medical purposes (optional) */
   bloodType?: string;
+  /** List of known allergies (optional) */
   allergies?: string[];
+  /** List of medical conditions (optional) */
   medicalConditions?: string[];
+  /** General notes about the student (optional) */
   notes?: string;
+  /** Tenant ID for multi-tenancy support */
   tenantId: string;
 }
 
+/**
+ * Student Entity - Aggregate Root
+ * 
+ * Represents a student in the school management system.
+ * This is an aggregate root, meaning it's the main entry point for all student-related operations.
+ * It encapsulates business rules around student enrollment, status changes, and data management.
+ * 
+ * Key Business Rules:
+ * - Students must have at least one guardian
+ * - Exactly one guardian must be designated as primary contact
+ * - Students must be between 3-25 years old at enrollment
+ * - Student numbers must be unique within a tenant
+ * - Only active students can graduate
+ * - Graduated students cannot be modified
+ */
 export class Student implements AggregateRoot {
+  /** Unique identifier for the student (inherited from Entity) */
   public readonly id: string;
+  /** Timestamp when the student record was created */
   public readonly createdAt: Date;
+  /** Timestamp when the student record was last updated */
   public readonly updatedAt: Date;
+  /** ID of the user who created this student record */
   public readonly createdBy?: string;
+  /** ID of the user who last updated this student record */
   public readonly updatedBy?: string;
+  /** Version number for optimistic locking */
   public readonly version: number;
+  /** Tenant ID for multi-tenancy support */
   public readonly tenantId: string;
 
+  /**
+   * Private constructor to enforce use of factory methods
+   * This ensures that all students are created through controlled methods
+   * that can apply business rules and validation
+   */
   private constructor(
     id: string,
     private _studentNumber: StudentNumber,
